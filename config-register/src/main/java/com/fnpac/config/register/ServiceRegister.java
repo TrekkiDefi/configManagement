@@ -1,22 +1,26 @@
 package com.fnpac.config.register;
 
+import com.alibaba.fastjson.JSON;
+import com.fnpac.config.consumer.APIInfo;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.ZooDefs;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Controller;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
-import java.net.JarURLConnection;
-import java.net.URL;
-import java.net.URLDecoder;
-import java.util.Enumeration;
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
+import java.net.*;
+import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.logging.Logger;
@@ -26,17 +30,25 @@ import java.util.logging.Logger;
  * <p>
  * API注册扫描器
  */
-public class APIScanner {
+public class ServiceRegister {
 
-    private static final Logger logger = Logger.getLogger(APIScanner.class.getName());
+    private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ServiceRegister.class);
 
     private String scanPath = "";// 扫描的包名
     private String connectString = "";// zookeeper服务地址
     private String bizCode = "sampleweb";// 应用名
+    private int port = 8080;// 应用名
 
     private CuratorFramework client = null;
 
-    public APIScanner(String scanPath, String connectString, String bizcode) {
+    /**
+     *
+     * @param scanPath 扫描的包名
+     * @param connectString zookeeper服务地址
+     * @param bizcode 应用名
+     * @param port 应用端口，默认8080
+     */
+    public ServiceRegister(String scanPath, String connectString, String bizcode, int port) {
 
         Assert.notNull(scanPath, "scanPath is Null");
         Assert.notNull(connectString, "connectString is Null");
@@ -45,6 +57,7 @@ public class APIScanner {
         this.scanPath = scanPath;
         this.connectString = connectString;
         this.bizCode = bizcode;
+        this.port = port;
         logger.info(scanPath + " -- " + connectString + " -- " + bizCode);
     }
 
@@ -64,8 +77,14 @@ public class APIScanner {
             Set classes = getClasses(scanPath, true);
             if (classes == null || classes.isEmpty())
                 return;
+            // 通过注解得到服务地址
+            List<String> services = getServicePath(classes);
 
+            for (String s : services)
+                logger.info("service: " + s);
 
+            //把服务注册到zk
+            registBizServices(services);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -105,7 +124,7 @@ public class APIScanner {
      * 和方法上的{@link org.springframework.web.bind.annotation.RequestMapping}
      *
      * @param packageName 扫描的包名
-     * @param recursive   是否循环迭代
+     * @param recursive   是否递归
      * @return
      */
     private Set<Class<?>> getClasses(final String packageName, boolean recursive) {
@@ -122,7 +141,7 @@ public class APIScanner {
             e.printStackTrace();
         }
 
-        // 循环迭代下去
+        // 循环递归
         while (dirs != null && dirs.hasMoreElements()) {
             try {
                 // 获取下一个元素
@@ -135,7 +154,7 @@ public class APIScanner {
                     logger.info("scan path: " + url.getPath() + ", protocol: " + protocol);
                     // 获取包的物理路径
                     String filePath = URLDecoder.decode(url.getFile(), "UTF-8");
-                    // 以文件的方式扫描整个包下的文件 并添加到集合中
+                    // 以文件的方式扫描整个包下的类，并添加到集合中
                     findAndAddClassesInPackageByFile(packageName, filePath,
                             recursive, classes);
                 } else if ("jar".equals(protocol)) {// 以jar的形式保存在服务器上
@@ -145,7 +164,7 @@ public class APIScanner {
                             .getJarFile();
                     // 从此jar包 得到一个枚举类
                     Enumeration<JarEntry> entries = jar.entries();
-                    // 同样的进行循环迭代
+                    // 同样的进行循环
                     while (entries.hasMoreElements()) {
                         // 获取jar里的一个文件，可能是目录或一些其他文件，如META-INF等文件。
                         JarEntry entry = entries.nextElement();
@@ -160,7 +179,7 @@ public class APIScanner {
                                 && entryName.startsWith(packageDirName)) {
 
                             int idx = entryName.lastIndexOf('/');
-                            // 扫描packageName包下的类，或者迭代扫描
+                            // 扫描packageName包下的类，或者递归扫描
                             if ((idx != -1 && idx == packageDirName.length()) || recursive) {
                                 // 去掉后面的".class"，获取真正的类名，把"/"替换成"."
                                 String className = entryName.substring(0,
@@ -182,11 +201,17 @@ public class APIScanner {
                 e.printStackTrace();
             }
         }
-
-
         return classes;
     }
 
+    /**
+     * 以文件的方式扫描整个包下的类，并添加到集合中
+     *
+     * @param packageName 包名
+     * @param packagePath 包路径
+     * @param recursive   是否递归扫描
+     * @param classes     Class集合
+     */
     private void findAndAddClassesInPackageByFile(String packageName, String packagePath,
                                                   final boolean recursive, Set<Class<?>> classes) {
         // 获取此包的目录，建立一个File
@@ -198,10 +223,127 @@ public class APIScanner {
         // 如果存在就获取包下的所有文件，包括目录
         File[] dirfiles = dir.listFiles(new FileFilter() {
             @Override
-            public boolean accept(File pathname) {
+            public boolean accept(File file) {
                 // 自定义过滤规则，如果可以循环(且包含子目录)或者是以.class结尾的文件(编译好的java类文件)
-                return false;
+                return (file.isDirectory() && recursive) || (file.getName().endsWith(".class"));
             }
         });
+
+        // 循环所有文件
+        if (dirfiles != null) {
+            for (File file : dirfiles) {
+                // 如果是目录 则继续扫描
+                if (file.isDirectory()) {
+                    findAndAddClassesInPackageByFile(
+                            packageName + "." + file.getName(),
+                            file.getAbsolutePath(), recursive, classes);
+                } else {
+                    // 如果是java类文件 去掉后面的.class 只留下类名
+                    String className = file.getName().substring(0,
+                            file.getName().length() - 6);
+                    try {
+                        // 添加到集合中去
+//                         classes.add(Class.forName(packageName + '.' + className));
+                        // 经过回复同学的提醒，这里用forName有一些不好，会触发static方法，没有使用classLoader的load干净
+                        classes.add(Thread.currentThread().getContextClassLoader()
+                                .loadClass(packageName + '.' + className));
+                    } catch (ClassNotFoundException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+    }
+
+    private List<String> getServicePath(Set<Class> classes) {
+        List<String> services = new ArrayList<>();
+        StringBuffer pathBuffer;
+        Annotation ann;
+
+        if (classes != null) {
+            for (Class cls : classes) {
+                ann = cls.getAnnotation(Controller.class);// Controller
+                if (ann == null)
+                    continue;
+
+                ann = cls.getAnnotation(RequestMapping.class);// RequestMapping
+                String basePath = getRequestMappingPath(ann);
+
+                Method ms[] = cls.getMethods();
+                if (ms == null || ms.length == 0)
+                    continue;
+
+                for (Method m : ms) {
+                    ann = m.getAnnotation(RequestMapping.class);
+                    String mPath = getRequestMappingPath(ann);
+
+                    if (mPath != null) {
+                        pathBuffer = new StringBuffer();
+                        if (!StringUtils.isEmpty(basePath))
+                            pathBuffer.append(basePath).append("/");
+                        pathBuffer.append(mPath);
+                    } else
+                        continue;
+
+                    services.add(pathBuffer.toString());
+                }
+            }
+        }
+        return services;
+    }
+
+    private String getRequestMappingPath(Annotation ann) {
+        if (ann == null)
+            return null;
+        else {
+            RequestMapping rma = (RequestMapping) ann;
+            String[] paths = rma.value();
+            if (paths.length > 0) {
+                String path = paths[0];
+                if (path.startsWith("/")) {
+                    path = path.substring(1);
+                }
+                if (path.endsWith("/")) {
+                    path = path.substring(0, path.length() - 1);
+                }
+                return path;
+            } else
+                return null;
+        }
+    }
+
+    private void registBizServices(List<String> services) {
+        try {
+
+            InetAddress addr = InetAddress.getLocalHost();
+            String ip = addr.getHostAddress();
+
+            for (String s : services) {
+                String svNode = s.replace("/", ".");
+                if (svNode.startsWith("."))
+                    svNode = svNode.substring(1);
+
+                // 如果接口节点不存在，创建接口节点
+                if (client.checkExists().forPath("/" + bizCode + "/" + svNode) == null) {
+                    client.create().creatingParentsIfNeeded()
+                            .withMode(CreateMode.PERSISTENT)
+                            .withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE)
+                            .forPath("/" + bizCode + "/" + svNode, ("api").getBytes());
+                }
+
+                // 创建当前机器的临时会话节点
+                APIInfo apiInfo = new APIInfo();
+                apiInfo.setPort(this.port);
+                client.create()
+                        .creatingParentsIfNeeded()
+                        .withMode(CreateMode.EPHEMERAL)// 临时会话节点
+                        .withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE)
+                        .forPath("/" + bizCode + "/" + svNode + "/" + ip, JSON.toJSONString(apiInfo).getBytes());
+            }
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }

@@ -9,13 +9,7 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>config-register</artifactId>
+    <artifactId>config-core</artifactId>
 
-    <dependencies>
-        <dependency>
-            <groupId>com.fnpac</groupId>
-            <artifactId>config-core</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
-        </dependency>
-    </dependencies>
+
 </project>
