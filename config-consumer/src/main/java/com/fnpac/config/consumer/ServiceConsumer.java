@@ -44,6 +44,7 @@ public class ServiceConsumer {
      */
     public Map<String, Set<String>> getServices(String bizCode) {
         try {
+            client.sync().forPath("/" + bizCode);// java.lang.Void 执行follower同步leader数据
             List<String> children = client.getChildren().forPath("/" + bizCode);
             logger.info("-----------services----------");
 
