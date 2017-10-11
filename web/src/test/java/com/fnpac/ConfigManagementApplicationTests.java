@@ -2,23 +2,22 @@ package com.fnpac;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.junit4.SpringRunner;
 
 import java.io.IOException;
-import java.net.JarURLConnection;
-import java.net.URL;
-import java.net.URLDecoder;
+import java.net.*;
 import java.util.Enumeration;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import java.util.logging.Logger;
 
 @RunWith(SpringRunner.class)
 @SpringBootTest
 public class ConfigManagementApplicationTests {
 
-    private static final Logger logger = Logger.getLogger(ConfigManagementApplicationTests.class.getName());
+    private static final Logger logger = LoggerFactory.getLogger(ConfigManagementApplicationTests.class);
 
     /**
      * 获取此{@code URL}的文件名。
@@ -35,16 +34,10 @@ public class ConfigManagementApplicationTests {
      * <p>
      * [jar inner name]: META-INF/<br/>
      * [jar inner name]: META-INF/MANIFEST.MF<br/>
-     * [jar inner name]: org/<br/>
-     * [jar inner name]: org/springframework/<br/>
-     * [jar inner name]: org/springframework/test/<br/>
+     * ...
      * [jar inner name]: org/springframework/test/annotation/<br/>
      * [jar inner name]: org/springframework/test/annotation/DirtiesContext$MethodMode.class<br/>
-     * [jar inner name]: org/springframework/test/annotation/ProfileValueSource.class<br/>
-     * [jar inner name]: org/springframework/test/annotation/Commit.class<br/>
-     * [jar inner name]: org/springframework/test/annotation/DirtiesContext$ClassMode.class<br/>
-     * [jar inner name]: org/springframework/test/annotation/TestAnnotationUtils.class<br/>
-     * [jar inner name]: org/springframework/test/annotation/DirtiesContext.class<br/>
+     * ...
      */
     @Test
     public void scanTest() {
@@ -128,5 +121,17 @@ public class ConfigManagementApplicationTests {
                 e.printStackTrace();
             }
         }
+    }
+
+    /**
+     * 获取本机ip
+     *
+     * @throws UnknownHostException
+     */
+    @Test
+    public void ipTest() throws UnknownHostException {
+        InetAddress addr = InetAddress.getLocalHost();
+        String ip = addr.getHostAddress();
+        logger.info(ip);
     }
 }

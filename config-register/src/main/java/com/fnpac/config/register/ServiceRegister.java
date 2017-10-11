@@ -34,6 +34,7 @@ public class ServiceRegister {
 
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ServiceRegister.class);
 
+    private String namespace = "webServiceCenter";
     private String scanPath = "";// 扫描的包名
     private String connectString = "";// zookeeper服务地址
     private String bizCode = "sampleweb";// 应用名
@@ -43,22 +44,22 @@ public class ServiceRegister {
 
     /**
      *
-     * @param scanPath 扫描的包名
+     * @param packageName 扫描的包名
      * @param connectString zookeeper服务地址
      * @param bizcode 应用名
      * @param port 应用端口，默认8080
      */
-    public ServiceRegister(String scanPath, String connectString, String bizcode, int port) {
+    public ServiceRegister(String packageName, String connectString, String bizcode, int port) {
 
-        Assert.notNull(scanPath, "scanPath is Null");
+        Assert.notNull(packageName, "scanPath is Null");
         Assert.notNull(connectString, "connectString is Null");
         Assert.notNull(bizcode, "bizcode is Null");
 
-        this.scanPath = scanPath;
+        this.scanPath = packageName;
         this.connectString = connectString;
         this.bizCode = bizcode;
         this.port = port;
-        logger.info(scanPath + " -- " + connectString + " -- " + bizCode);
+        logger.info(packageName + " -- " + connectString + " -- " + bizcode);
     }
 
     /**
@@ -95,10 +96,21 @@ public class ServiceRegister {
      */
     private void buildZkClient() {
         RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);// 重试策略
-        client = CuratorFrameworkFactory.builder().connectString(connectString)
-                .sessionTimeoutMs(10000).retryPolicy(retryPolicy)
-                .namespace("webServiceCenter").build();
+        final CuratorFrameworkFactory.Builder builder = CuratorFrameworkFactory.builder().connectString(connectString)
+                .sessionTimeoutMs(10000).retryPolicy(retryPolicy);
+        client = builder.build();
         client.start();
+        try {
+            if (client.checkExists().forPath("/" + namespace) == null) {
+                client.create().creatingParentsIfNeeded()
+                        .withMode(CreateMode.PERSISTENT)
+                        .withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE)
+                        .forPath("/" + namespace);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        client.usingNamespace(namespace);
     }
 
     /**
@@ -315,8 +327,8 @@ public class ServiceRegister {
     private void registBizServices(List<String> services) {
         try {
 
-            InetAddress addr = InetAddress.getLocalHost();
-            String ip = addr.getHostAddress();
+            // 获取本机ip
+            String ip = getHostAddress();
 
             for (String s : services) {
                 String svNode = s.replace("/", ".");
@@ -345,5 +357,15 @@ public class ServiceRegister {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * 获取本机IP
+     * @return
+     * @throws UnknownHostException
+     */
+    private String getHostAddress() throws UnknownHostException {
+        InetAddress addr = InetAddress.getLocalHost();
+        return addr.getHostAddress();
     }
 }
