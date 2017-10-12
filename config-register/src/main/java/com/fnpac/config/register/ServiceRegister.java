@@ -1,7 +1,8 @@
 package com.fnpac.config.register;
 
 import com.alibaba.fastjson.JSON;
-import com.fnpac.config.consumer.APIInfo;
+import com.fnpac.config.core.APIInfo;
+import com.fnpac.config.utils.LocalHostUtils;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -19,11 +20,15 @@ import java.io.FileFilter;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
-import java.net.*;
+import java.net.JarURLConnection;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.net.UnknownHostException;
 import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import java.util.logging.Logger;
+
+import static com.fnpac.config.utils.LocalHostUtils.SEPARATOR;
 
 /**
  * Created by liuchunlong on 2017/10/8.
@@ -34,32 +39,53 @@ public class ServiceRegister {
 
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ServiceRegister.class);
 
-    private String namespace = "webServiceCenter";
-    private String scanPath = "";// 扫描的包名
+    private String packageName = "";// 扫描的包名
     private String connectString = "";// zookeeper服务地址
     private String bizCode = "sampleweb";// 应用名
-    private int port = 8080;// 应用名
+
+    private String namespace = "webServiceCenter";
+    private String schema;// 注册的api的协议
+    private String ip;// 注册的api的ip地址
+    private Integer port;// 注册的api的端口
+    private Boolean isSecure = true;// 是否是使用https协议
 
     private CuratorFramework client = null;
 
     /**
-     *
-     * @param packageName 扫描的包名
+     * @param packageName   扫描的包名
      * @param connectString zookeeper服务地址
-     * @param bizcode 应用名
-     * @param port 应用端口，默认8080
+     * @param bizCode       应用名
      */
-    public ServiceRegister(String packageName, String connectString, String bizcode, int port) {
+    protected ServiceRegister(String packageName, String connectString, String bizCode) {
 
-        Assert.notNull(packageName, "scanPath is Null");
+        Assert.notNull(packageName, "packageName is Null");
         Assert.notNull(connectString, "connectString is Null");
-        Assert.notNull(bizcode, "bizcode is Null");
+        Assert.notNull(bizCode, "bizcode is Null");
 
-        this.scanPath = packageName;
+        this.packageName = packageName;
         this.connectString = connectString;
-        this.bizCode = bizcode;
+        this.bizCode = bizCode;
+        logger.info(packageName + " -- " + connectString + " -- " + bizCode);
+    }
+
+    public void setNamespace(String namespace) {
+        this.namespace = namespace;
+    }
+
+    public void setSchema(String schema) {
+        this.schema = schema;
+    }
+
+    public void setIp(String ip) {
+        this.ip = ip;
+    }
+
+    public void setPort(Integer port) {
         this.port = port;
-        logger.info(packageName + " -- " + connectString + " -- " + bizcode);
+    }
+
+    public void setSecure(Boolean secure) {
+        isSecure = secure;
     }
 
     /**
@@ -75,7 +101,7 @@ public class ServiceRegister {
             registBiz();
 
             // 扫描所有action类和方法
-            Set classes = getClasses(scanPath, true);
+            Set classes = getClasses(packageName, true);
             if (classes == null || classes.isEmpty())
                 return;
             // 通过注解得到服务地址
@@ -96,21 +122,10 @@ public class ServiceRegister {
      */
     private void buildZkClient() {
         RetryPolicy retryPolicy = new ExponentialBackoffRetry(1000, 3);// 重试策略
-        final CuratorFrameworkFactory.Builder builder = CuratorFrameworkFactory.builder().connectString(connectString)
-                .sessionTimeoutMs(10000).retryPolicy(retryPolicy);
-        client = builder.build();
+        client = CuratorFrameworkFactory.builder().connectString(connectString)
+                .sessionTimeoutMs(10000).retryPolicy(retryPolicy)
+                .namespace(namespace).build();
         client.start();
-        try {
-            if (client.checkExists().forPath("/" + namespace) == null) {
-                client.create().creatingParentsIfNeeded()
-                        .withMode(CreateMode.PERSISTENT)
-                        .withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE)
-                        .forPath("/" + namespace);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        client.usingNamespace(namespace);
     }
 
     /**
@@ -327,8 +342,19 @@ public class ServiceRegister {
     private void registBizServices(List<String> services) {
         try {
 
-            // 获取本机ip
-            String ip = getHostAddress();
+            if (StringUtils.isEmpty(this.ip)) {
+                this.ip = LocalHostUtils.getHostAddress();
+            }
+            if (StringUtils.isEmpty(this.schema) || StringUtils.isEmpty(this.port)) {
+                String schemaPort = LocalHostUtils.getSchemaPort(this.isSecure);
+                Assert.notNull(schemaPort, "Get tomcat information failed, schema or port is Null");
+
+                if (StringUtils.isEmpty(this.schema))
+                    this.schema = schemaPort.split(SEPARATOR)[0];
+
+                if (StringUtils.isEmpty(this.port))
+                    this.port = Integer.valueOf(schemaPort.split(SEPARATOR)[1]);
+            }
 
             for (String s : services) {
                 String svNode = s.replace("/", ".");
@@ -346,11 +372,12 @@ public class ServiceRegister {
                 // 创建当前机器的临时会话节点
                 APIInfo apiInfo = new APIInfo();
                 apiInfo.setPort(this.port);
+                apiInfo.setSchema(this.schema);
                 client.create()
                         .creatingParentsIfNeeded()
                         .withMode(CreateMode.EPHEMERAL)// 临时会话节点
                         .withACL(ZooDefs.Ids.OPEN_ACL_UNSAFE)
-                        .forPath("/" + bizCode + "/" + svNode + "/" + ip, JSON.toJSONString(apiInfo).getBytes());
+                        .forPath("/" + bizCode + "/" + svNode + "/" + this.ip, JSON.toJSONString(apiInfo).getBytes());
             }
         } catch (UnknownHostException e) {
             e.printStackTrace();
@@ -359,13 +386,5 @@ public class ServiceRegister {
         }
     }
 
-    /**
-     * 获取本机IP
-     * @return
-     * @throws UnknownHostException
-     */
-    private String getHostAddress() throws UnknownHostException {
-        InetAddress addr = InetAddress.getLocalHost();
-        return addr.getHostAddress();
-    }
+
 }

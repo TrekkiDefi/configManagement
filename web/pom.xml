@@ -18,6 +18,11 @@
             <artifactId>config-register</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>RELEASE</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -37,6 +42,34 @@
                     <uriEncoding>UTF-8</uriEncoding>
                     <finalName>${project.build.finalName}</finalName>
                     <server>tomcat7</server>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.mortbay.jetty</groupId>
+                <artifactId>jetty-maven-plugin</artifactId>
+                <version>8.1.14.v20131031</version>
+                <configuration>
+                    <scanIntervalSeconds>10</scanIntervalSeconds>
+                    <reload>manual</reload>
+                    <connectors>
+                        <connector implementation="org.eclipse.jetty.server.nio.SelectChannelConnector">
+                            <port>8080</port>
+                            <maxIdleTime>60000</maxIdleTime>
+                        </connector>
+                    </connectors>
+                    <webAppConfig>
+                        <allowDuplicateFragmentNames>true</allowDuplicateFragmentNames>
+                        <contextPath>${project.build.finalName}</contextPath>
+                    </webAppConfig>
+                    <stopPort>8081</stopPort>
+                    <stopKey>jetty</stopKey>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
                 </configuration>
             </plugin>
         </plugins>
