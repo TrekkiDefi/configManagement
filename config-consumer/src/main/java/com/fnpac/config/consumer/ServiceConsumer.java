@@ -134,6 +134,11 @@ public class ServiceConsumer {
              */
             @Override
             public void childEvent(CuratorFramework client, PathChildrenCacheEvent event) throws Exception {
+
+                if (event.getData() != null) {
+                    // 监听到子节点变化，节点path:/configManagement/web.index/192.168.133.134, 节点数据:{"port":8080,"schema":"http"}
+                    logger.info("监听到子节点变化，节点path:" + event.getData().getPath() + ", 节点数据:" + new String(event.getData().getData(), "UTF-8"));
+                }
                 if (event.getType().equals(PathChildrenCacheEvent.Type.INITIALIZED)) {
                     System.out.println("客户端子节点cache初始化数据完成");
                 } else if (event.getType().equals(PathChildrenCacheEvent.Type.CHILD_ADDED)) {
