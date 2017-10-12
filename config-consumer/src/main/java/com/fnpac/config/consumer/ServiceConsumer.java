@@ -1,7 +1,6 @@
 package com.fnpac.config.consumer;
 
 import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
 import com.fnpac.config.core.APIInfo;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
@@ -16,6 +15,7 @@ import org.springframework.util.StringUtils;
 
 import java.io.UnsupportedEncodingException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Created by 刘春龙 on 2017/10/9.
@@ -27,8 +27,8 @@ public class ServiceConsumer {
     private String namespace = "webServiceCenter";
     private CuratorFramework client = null;
 
-    private Map<String, Set<APIInfo>> services = new HashMap<>();
-    private Map<String, Set<String>> servicesByP = new HashMap<>();
+    private Map<String, Set<APIInfo>> services = new ConcurrentHashMap<>();
+    private Map<String, Set<String>> servicesByP = new ConcurrentHashMap<>();
 
     /**
      * @param connectString zookeeper服务地址
@@ -61,7 +61,7 @@ public class ServiceConsumer {
      * @param bizCode 应用名
      * @return
      */
-    public synchronized Map<String, Set<APIInfo>> getServices(String bizCode) {
+    public Map<String, Set<APIInfo>> getServices(String bizCode) {
         try {
             client.sync().forPath("/" + bizCode);// java.lang.Void 执行follower同步leader数据
             List<String> children = client.getChildren().forPath("/" + bizCode);
@@ -147,7 +147,7 @@ public class ServiceConsumer {
         });
     }
 
-    private synchronized void updateLocalService(String path, byte[] data, int delOrAdd) {
+    private void updateLocalService(String path, byte[] data, int delOrAdd) {
         String nodes[] = path.split("/");
         String provider = nodes[nodes.length - 1];
         String servicepath = nodes[nodes.length - 2];
@@ -207,9 +207,10 @@ public class ServiceConsumer {
         }
     }
 
-    public synchronized void accessService(String bizCode, String api) {
+    public String accessService(String bizCode, String api) {
 
         List<APIInfo> providerList;
+
         Set<APIInfo> providers = services.get(api);
         if (providers != null && providers.size() > 0) {
             providerList = new ArrayList<>();
@@ -218,8 +219,10 @@ public class ServiceConsumer {
             APIInfo apiInfo = providerList.get(0);
             String server = apiInfo.getSchema() + "://" + apiInfo.getIp() + ":" + apiInfo.getPort() + "/" + bizCode + api;
             logger.info("access server: " + server);
+            return server;
         } else {
-            System.out.println("access server " + api + ",没有服务提供者");
+            logger.info("access server " + api + " 没有服务提供者");
+            return null;
         }
     }
 }
